@@ -15,6 +15,7 @@
   "license": "MIT",
   "dependencies": {
     "bitcoin-core": "^5.0.0",
-    "bitcoinjs-lib": "^6.1.5"
+    "bitcoinjs-lib": "^6.1.5",
+    "ecpair": "^2.1.0"
   }
 }

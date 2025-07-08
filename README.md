@@ -42,10 +42,10 @@ Provides a client to connect to a Bitcoin Core node via RPC.
 *   **Functionality**:
     *   Connect to a Bitcoin node (mainnet, testnet, regtest).
     *   Fetch blockchain information (`getBlockchainInfo`).
-    *   Fetch block data (`getBlock`).
+    *   Fetch block data (`getBlockByHash`).
     *   Fetch raw transaction data (`getRawTransaction`).
-    *   Includes a placeholder for `findReusedSignatures` to search for reused signatures in blocks (requires further implementation).
-*   **Dependencies**: `bitcoin-core`
+    *   `findReusedSignatures(startBlockHeight, endBlockHeight)`: Scans a range of blocks to find transactions where ECDSA nonce (`k`) reuse might have occurred. This is critical for identifying vulnerabilities that could lead to private key exposure. It parses P2PKH, P2WPKH, and P2SH-P2WPKH inputs. (See also "Signature Reuse Scanning" below).
+*   **Dependencies**: `bitcoin-core`, `bitcoinjs-lib`
 *   **Usage (Node.js)**:
     ```javascript
     const BitcoinRPC = require('./bitcoin_rpc.js');
@@ -117,7 +117,8 @@ Provides various hashing functions commonly used in Bitcoin.
     *   `hashMessageForSigning(messageString)`: Computes the hash for a message according to Bitcoin's signed message standard.
     *   `getTransactionId(transactionHex)`: Calculates the traditional transaction ID (txid).
     *   `getWitnessTransactionId(transactionHex)`: Calculates the witness transaction ID (wtxid).
-*   **Dependencies**: `bitcoinjs-lib` (for varint encoding in message signing), Node.js `crypto` module.
+    *   `recoverPrivateKeyFromKReuse(r, s1, h1, s2, h2, curveOrderN)`: Attempts to recover an ECDSA private key if the nonce 'k' was reused in two signatures sharing the same 'r' value. Uses functions from `bignum.js`.
+*   **Dependencies**: `bitcoinjs-lib` (for varint encoding), Node.js `crypto` module, `bignum.js`.
 *   **Usage (Node.js or include in HTML)**:
     ```javascript
     const CryptoUtils = require('./crypto_utils.js');
@@ -170,10 +171,39 @@ The display of annotated transaction details in `transaction.html` has been enha
 
 *   **Functionality**: When viewing the annotated structure of a transaction, hovering over elements like `<script>`, `<txnid>`, `<varlen>`, etc., will now show a tooltip (using the browser's native `title` attribute) displaying the attributes of that XML node (e.g., `tag: "in"`, `value: "0123af..."`). This provides more context without cluttering the main display.
 
+## 8. Signature Reuse Scanning and Private Key Recovery (`scan_reuse.js`)
+
+A Node.js script to scan a range of Bitcoin blocks for ECDSA `k`-value reuse and attempt private key recovery.
+
+*   **Functionality**:
+    *   Connects to a Bitcoin Core node using RPC.
+    *   Scans specified blocks using `bitcoin_rpc.js#findReusedSignatures` to identify pairs of signatures from the same public key that share the same `r` value but sign different message hashes.
+    *   For each identified pair, it attempts to recover the private key using `crypto_utils.js#recoverPrivateKeyFromKReuse`.
+    *   If successful, it verifies the recovered private key by deriving its public key and comparing it to the original. It then derives and prints P2PKH and P2WPKH addresses.
+*   **Dependencies**: `bitcoin_rpc.js`, `crypto_utils.js`, `bitcoinjs-lib`, `ecpair`.
+*   **Usage (Node.js CLI)**:
+    ```bash
+    node scan_reuse.js --startBlock <block_height> [options]
+    ```
+*   **Command-Line Options**:
+    *   `--startBlock <number>`: (Required) The block height to start scanning from.
+    *   `--endBlock <number>`: (Optional) The block height to end scanning at. Defaults to scanning only the `startBlock`.
+    *   `--network <mainnet|testnet|regtest>`: (Optional) Defaults to `mainnet`.
+    *   `--host <ip/hostname>`: (Optional) RPC host. Defaults to `localhost`.
+    *   `--port <number>`: (Optional) RPC port (defaults based on network).
+    *   `--user <username>`: (Optional) RPC username.
+    *   `--pass <password>`: (Optional) RPC password.
+*   **Example**:
+    ```bash
+    node scan_reuse.js --network regtest --startBlock 110 --endBlock 120 --user myrpcuser --pass myrpcpassword
+    ```
+*   **Output**: The script logs its progress, details of any k-reuse candidates found, and the results of private key recovery attempts, including the recovered private key (hex) and derived addresses if successful.
+
 # Remaining To-Do Items
 
 The original `todo` list has been significantly addressed. Any remaining items or new ideas can be tracked here.
 (The original list of todos from the README is now largely completed by the features above).
+The `findReusedSignatures` function in `bitcoin_rpc.js` could be extended to support more script types (P2PK, P2MS, P2WSH, Taproot) for broader analysis.
 
 # AUTHOR
 

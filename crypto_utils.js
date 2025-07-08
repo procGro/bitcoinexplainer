@@ -114,9 +114,104 @@ class CryptoUtils {
     }
 }
 
+// --- ECDSA Private Key Recovery from k-reuse ---
+CryptoUtils.N_SECP256K1 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141n; // Curve order as BigInt
+
+/**
+ * Attempts to recover an ECDSA private key if the nonce 'k' was reused.
+ * All hex string inputs are expected to represent positive integers.
+ * r, s1, s2 are signature components. h1, h2 are message hashes.
+ *
+ * @param {string | Buffer | BigInt} rHex - The common 'r' value of the two signatures (hex string, Buffer, or BigInt).
+ * @param {string | Buffer | BigInt} s1Hex - The 's' value of the first signature (hex string, Buffer, or BigInt).
+ * @param {string | Buffer | BigInt} h1Hex - The message hash for the first signature (hex string, Buffer, or BigInt).
+ * @param {string | Buffer | BigInt} s2Hex - The 's' value of the second signature (hex string, Buffer, or BigInt).
+ * @param {string | Buffer | BigInt} h2Hex - The message hash for the second signature (hex string, Buffer, or BigInt).
+ * @param {BigInt} curveOrderN - The order of the curve's base point (e.g., N_SECP256K1).
+ * @returns {BigInt|null} The recovered private key as a BigInt, or null if recovery fails (e.g., singular matrix).
+ */
+CryptoUtils.recoverPrivateKeyFromKReuse = function(rHex, s1Hex, h1Hex, s2Hex, h2Hex, curveOrderN = N_SECP256K1) {
+    const { modinv } = require('./bignum.js'); // Assuming bignum.js is in the same directory or accessible
+
+    try {
+        const r = typeof rHex === 'bigint' ? rHex : BigInt("0x" + Buffer.from(rHex, 'hex').toString('hex'));
+        const s1 = typeof s1Hex === 'bigint' ? s1Hex : BigInt("0x" + Buffer.from(s1Hex, 'hex').toString('hex'));
+        const h1 = typeof h1Hex === 'bigint' ? h1Hex : BigInt("0x" + Buffer.from(h1Hex, 'hex').toString('hex'));
+        const s2 = typeof s2Hex === 'bigint' ? s2Hex : BigInt("0x" + Buffer.from(s2Hex, 'hex').toString('hex'));
+        const h2 = typeof h2Hex === 'bigint' ? h2Hex : BigInt("0x" + Buffer.from(h2Hex, 'hex').toString('hex'));
+        const n = curveOrderN;
+
+        if (r <= 0n || s1 <= 0n || h1 < 0n || s2 <= 0n || h2 < 0n || n <= 0n) {
+            console.error("Invalid input values for private key recovery (must be positive, hashes can be 0).");
+            return null;
+        }
+        if (r >= n || s1 >= n || s2 >=n ) { // Hashes can be larger than n, they are reduced by EC lib usually
+             console.warn("r or s values are >= curve order n. This is unusual.");
+        }
+
+
+        // k = (h1 - h2) * modinv(s1 - s2, n) mod n
+        let s_diff = (s1 - s2) % n;
+        if (s_diff < 0n) s_diff += n; // Ensure positive modulo result
+        if (s_diff === 0n) {
+            // This happens if s1 == s2. If h1 != h2, then it implies k is undefined or infinite,
+            // which means the signatures were not proper or there's an issue.
+            // If s1 == s2 and h1 == h2, they are identical signatures for identical messages, no k-reuse exploit here.
+            console.error("s1 and s2 are identical, cannot recover k (or private key).");
+            return null;
+        }
+
+        const s_diff_inv = modinv(s_diff, n);
+        if (s_diff_inv === null || s_diff_inv === 0n) { // modinv in bignum.js might return non-BigInt on error or 0 if not invertible
+             console.error("Modular inverse of (s1 - s2) does not exist.");
+             return null;
+        }
+
+
+        let h_diff = (h1 - h2) % n;
+        if (h_diff < 0n) h_diff += n;
+
+        let k = (h_diff * s_diff_inv) % n;
+        if (k < 0n) k += n;
+        if (k === 0n) { // k should not be zero
+            console.error("Calculated k is zero, which is invalid.");
+            return null;
+        }
+
+        // privKey = (s1 * k - h1) * modinv(r, n) mod n
+        const r_inv = modinv(r, n);
+         if (r_inv === null || r_inv === 0n) {
+             console.error("Modular inverse of r does not exist.");
+             return null;
+        }
+
+        let sk = (s1 * k) % n;
+        let sk_minus_h1 = (sk - h1) % n;
+        if (sk_minus_h1 < 0n) sk_minus_h1 += n;
+
+        let privateKey = (sk_minus_h1 * r_inv) % n;
+        if (privateKey < 0n) privateKey += n;
+
+        // Private key must be > 0 and < n
+        if (privateKey === 0n) {
+            console.error("Calculated private key is zero, which is invalid.");
+            return null;
+        }
+
+        return privateKey;
+
+    } catch (error) {
+        console.error("Error during private key recovery:", error);
+        return null;
+    }
+};
+
+
 // --- Example Usage & Basic Tests ---
 /*
 function runCryptoUtilsExamples() {
+    const { modinv } = require('./bignum.js'); // For test case generation
+
     const message = "This is a test message.";
 
     console.log("--- Message Hashing Examples ---");
@@ -200,6 +295,66 @@ function runCryptoUtilsExamples() {
     // console.log("Calculated SegWit Witness TxID:", calculatedWitnessTxIdSegwit);
     // console.log("Expected SegWit Witness TxID:  ", expectedWitnessTxIdSegwit);
 
+    console.log("\n--- ECDSA K-Reuse Private Key Recovery Test ---");
+    const test_N = CryptoUtils.N_SECP256K1;
+    const test_d = 12345678901234567890123456789012345678901234567890123456789012345n; // Example private key
+    const test_k = 98765432109876543210987654321098765432109876543210987654321098765n;  // Example reused k
+
+    // For a realistic test, r must be derived from k*G.
+    // However, to test the math of recoverPrivateKeyFromKReuse, we can assume a valid r.
+    // Let's use a placeholder r. A real r would be an x-coordinate of a point, so < N.
+    const test_r_val = BigInt("0x1f2a3b4c5d6e7f8091a2b3c4d5e6f708091a2b3c4d5e6f708091a2b3c4d5e6f7");
+
+    if (test_k >= test_N || test_r_val >= test_N || test_d >= test_N || test_k === 0n || test_r_val === 0n || test_d === 0n) {
+        console.error("Test case parameters are invalid (too large or zero). Adjust them.");
+    } else {
+        const test_h1 = BigInt("0x1111111111111111111111111111111111111111111111111111111111111111");
+        const test_h2 = BigInt("0x2222222222222222222222222222222222222222222222222222222222222222");
+
+        try {
+            const k_inv = modinv(test_k, test_N);
+            if (k_inv === 0n) throw new Error("k is not invertible for test case generation");
+
+            let s1_num = (test_h1 + test_d * test_r_val) % test_N;
+            let test_s1 = (k_inv * s1_num) % test_N;
+            if (test_s1 < 0n) test_s1 += test_N;
+
+            let s2_num = (test_h2 + test_d * test_r_val) % test_N;
+            let test_s2 = (k_inv * s2_num) % test_N;
+            if (test_s2 < 0n) test_s2 += test_N;
+
+            if (test_s1 === 0n || test_s2 === 0n) {
+                 console.error("Generated s1 or s2 is zero, invalid signature component for test. Pick different d, k, r, h1, h2.");
+            } else {
+                console.log("Test Case Generation:");
+                console.log("  d (privKey):", test_d.toString(16));
+                console.log("  k (nonce):  ", test_k.toString(16));
+                console.log("  r:          ", test_r_val.toString(16));
+                console.log("  h1:         ", test_h1.toString(16));
+                console.log("  s1:         ", test_s1.toString(16));
+                console.log("  h2:         ", test_h2.toString(16));
+                console.log("  s2:         ", test_s2.toString(16));
+
+                const recovered_d = CryptoUtils.recoverPrivateKeyFromKReuse(
+                    test_r_val, test_s1, test_h1, test_s2, test_h2, test_N
+                );
+
+                if (recovered_d !== null) {
+                    console.log("Recovered d:    ", recovered_d.toString(16));
+                    console.log("Matches original d:", recovered_d === test_d);
+                    if (recovered_d !== test_d) {
+                        console.error("Private key recovery test FAILED. Expected vs Recovered mismatch.");
+                    } else {
+                        console.log("Private key recovery test PASSED.");
+                    }
+                } else {
+                    console.error("Private key recovery test FAILED. Result was null.");
+                }
+            }
+        } catch (e) {
+            console.error("Error during test case setup or recovery:", e.message, e.stack);
+        }
+    }
 }
 
 // runCryptoUtilsExamples(); // Uncomment to run example if testing this file directly with Node.js

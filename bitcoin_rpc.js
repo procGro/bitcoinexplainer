@@ -29,20 +29,22 @@ function parseP2WPKHInput(witness) {
 
 class BitcoinRPC {
     constructor(options = {}) {
-        let host = options.host || 'localhost';
-        // Ensure host includes protocol for bitcoin-core library
-        if (!host.startsWith('http://') && !host.startsWith('https://')) {
-            host = 'http://' + host;
+        let rpcHost = options.host || 'localhost';
+        // If options.host already includes a protocol, use it directly.
+        // Otherwise, default to http. The user can override by providing full URL in options.host.
+        if (!rpcHost.includes('://')) {
+            rpcHost = 'http://' + rpcHost;
         }
 
         this.client = new Client({
-            host: host,
-            network: options.network || 'mainnet', // Default to mainnet
+            host: rpcHost, // User can provide full URL like https://host:port/path
+            network: options.network || 'mainnet',
             username: options.username,
             password: options.password,
-            port: options.port || (options.network === 'regtest' ? 18443 : (options.network === 'testnet' ? 18332 : 8332)),
+            port: options.port || (options.network === 'regtest' ? 18443 : (options.network === 'testnet' ? 18332 : 8332)), // Port might be part of host if full URL
             timeout: options.timeout || 30000,
         });
+
         // Determine the bitcoinjs-lib network object based on the network string
         if (options.network === 'testnet') {
             this.bitcoinJsNetwork = bitcoin.networks.testnet;

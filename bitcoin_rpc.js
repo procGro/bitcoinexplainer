@@ -43,6 +43,9 @@ class BitcoinRPC {
             password: options.password,
             port: options.port || (options.network === 'regtest' ? 18443 : (options.network === 'testnet' ? 18332 : 8332)), // Port might be part of host if full URL
             timeout: options.timeout || 30000,
+            agentOptions: { // Add agentOptions to disable self-signed cert rejection
+                rejectUnauthorized: false,
+            },
         });
 
         // Determine the bitcoinjs-lib network object based on the network string

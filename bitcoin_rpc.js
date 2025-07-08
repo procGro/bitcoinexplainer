@@ -29,12 +29,18 @@ function parseP2WPKHInput(witness) {
 
 class BitcoinRPC {
     constructor(options = {}) {
+        let host = options.host || 'localhost';
+        // Ensure host includes protocol for bitcoin-core library
+        if (!host.startsWith('http://') && !host.startsWith('https://')) {
+            host = 'http://' + host;
+        }
+
         this.client = new Client({
-            host: options.host || 'localhost', // Default to localhost
+            host: host,
             network: options.network || 'mainnet', // Default to mainnet
             username: options.username,
             password: options.password,
-            port: options.port || 8332, // Default Bitcoin Core RPC port
+            port: options.port || (options.network === 'regtest' ? 18443 : (options.network === 'testnet' ? 18332 : 8332)),
             timeout: options.timeout || 30000,
         });
         // Determine the bitcoinjs-lib network object based on the network string

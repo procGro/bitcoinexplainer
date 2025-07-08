@@ -21,208 +21,142 @@
 <script language=javascript>
 'use strict';
 
+// Global variables for single curve interaction are removed or repurposed for the grid.
+// var g_a; var g_b;  // the curve parameters.
+// var ec;         // the curve.
+// var curvepoints = []; // the list of all points on the curve.
+// var g_mouse_point;  // selected with 'mouse-over'
+// var g_start;     // the starting point, selected by hovering over the grid.
+// var g_nrlines=10;   // how many lines to draw from the starting point
+// var pointlookup = {}; // This might be useful per-canvas if interaction is added later
 
-var g_a; var g_b;  // the curve parameters.
+const CANVAS_SIZE = 400;
+const POINT_X_RANGE = 20; // from -10 to 10
+const POINT_SCALE_FACTOR = CANVAS_SIZE / POINT_X_RANGE; // e.g. 400 / 20 = 20
 
-var ec;         // the curve.
-
-var curvepoints = []; // the list of all points on the curve.
-var g_mouse_point;  // selected with 'mouse-over'
-var g_start;     // the starting point, selected by hovering over the grid.
-var g_nrlines=10;   // how many lines to draw from the starting point
-var pointlookup = {};
-
-function loadrealec(a, b)
-{
-    var F = new RealNumbers();
-    var newec = new EllipticCurve(F, a, b);
-    if (!ec || !ec.equalscurve(newec)) {
-        g_start = undefined;
-        curvepoints = [];
-        pointlookup = {};
-        if (ec)
-            console.log("curve changed", ec.a, ec.b, " -> ", newec.a, newec.b);
-        ec = newec;
-        calcpoints();
-    }
-    else if (g_mouse_point) {
-        g_start = g_mouse_point;
-        console.log("using mouse point");
-    }
-    drawgrid();
-    drawpath();
-    //loadpoints();
+// New function to calculate coordinate transformation for a given point component (x or y)
+function transformCoord(value) {
+    return (value + (POINT_X_RANGE / 2)) * POINT_SCALE_FACTOR;
 }
-function calcpoints()
-{
-    curvepoints = [ec.infinity()];
-    for (var x = -10.0 ; x<10.0 ; x+=0.01)
-    {
-        var ysquared = x*x*x+g_a*x+g_b;
-        var y0 = ec.field.value(ysquared).sqrt(0);
-        var y1 = ec.field.value(ysquared).sqrt(1);
-        if (typeof(y0)!="undefined")
-        {
-            curvepoints.push(ec.point(x, y0));
-            if (!y0.equals(y1))
-                curvepoints.push(ec.point(x, y1));
+
+function drawPointOnCanvas(ctx, p) {
+    if (p.isinf()) return;
+    // Adjust point drawing to use the new transformation
+    ctx.fillRect(transformCoord(p.x.real()), transformCoord(p.y.real()), 2, 2); // Smaller points for smaller canvas
+}
+
+function calculateCurvePoints(ecInstance, param_a, param_b) {
+    let points = [ecInstance.infinity()];
+    // Iterate with a step suitable for the visual range
+    for (var x = -10.0; x < 10.0; x += 0.02) { // Increased density slightly for better visuals
+        var ysquared = x * x * x + param_a * x + param_b;
+        var y0 = ecInstance.field.value(ysquared).sqrt(0);
+        var y1 = ecInstance.field.value(ysquared).sqrt(1);
+        if (typeof(y0) !== "undefined") {
+            points.push(ecInstance.point(x, y0));
+            if (!y0.equals(y1)) {
+                points.push(ecInstance.point(x, y1));
+            }
         }
     }
-    g_start = curvepoints[Math.floor(curvepoints.length/2)];
-
-    for (var pt of curvepoints)
-        pointlookup[indexkey(pt)] = pt;
-}
-function indexkey(p)
-{
-    if (p.isinf())
-        return "(*,*)";
-    return "("+Math.round(p.x.real()/5).toString(10)+","+Math.round(p.y.real()/5).toString(10)+")";
-}
-function findpoint(x, y)
-{
-    var ix = "("+Math.round(x/5).toString(10)+","+Math.round(y/5).toString(10)+")";
-    return pointlookup[ix];
-}
-function cvx(r) { return (r.real()+10)*50; }
-function drawpoint(ctx, pt)
-{
-    if (pt.isinf())
-        return;
-    ctx.fillRect(cvx(pt.x), cvx(pt.y), 3, 3);
-}
-function startline(ctx, p)
-{
-    if (p.isinf())
-        return;
-    ctx.moveTo(cvx(p.x), cvx(p.y));
-}
-function drawlineto(ctx, p)
-{
-    if (p.isinf())
-        return;
-    ctx.lineTo(cvx(p.x), cvx(p.y));
+    return points;
 }
 
-function drawgrid()
-{
-    var canvas = document.getElementById("points");
-    canvas.width = 1000;
-    canvas.height = 1000;
-
-    var ctx = canvas.getContext("2d")
+function drawSingleCurve(canvasId, param_a, param_b) {
+    var canvas = document.getElementById(canvasId);
+    if (!canvas) {
+        console.error("Canvas not found:", canvasId);
+        return;
+    }
+    var ctx = canvas.getContext("2d");
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    for (var pt of curvepoints)
-    {
-        drawpoint(ctx, pt);
+    var F = new RealNumbers();
+    var currentEC = new EllipticCurve(F, param_a, param_b);
+
+    // Check discriminant for this specific curve
+    var discriminant = -16 * (4 * param_a**3 + 27 * param_b**2);
+    if (discriminant === 0) {
+        ctx.font = "16px Arial";
+        ctx.fillStyle = "red";
+        ctx.textAlign = "center";
+        ctx.fillText(`Singular (a=${param_a}, b=${param_b})`, canvas.width/2, canvas.height/2);
+        ctx.fillText(`Δ = 0`, canvas.width/2, canvas.height/2 + 20);
+        return; // Don't draw singular curves beyond the message
+    }
+
+
+    var pointsOnCurve = calculateCurvePoints(currentEC, param_a, param_b);
+
+    ctx.fillStyle = "black"; // Default color for points
+    for (var pt of pointsOnCurve) {
+        drawPointOnCanvas(ctx, pt);
+    }
+
+    // Optionally, display a and b values on the canvas
+    ctx.font = "12px Arial";
+    ctx.fillStyle = "blue";
+    ctx.fillText(`a=${param_a}, b=${param_b}`, 10, 20);
+    ctx.fillText(`Δ=${discriminant.toFixed(2)}`, 10, 35);
+}
+
+
+function drawCurveGrid() {
+    const curvesToShow = [
+        { id: "curve_0_0", a: -1, b: 1 },   // Standard examples
+        { id: "curve_0_1", a: 0, b: 1 },
+        { id: "curve_1_0", a: 1, b: 1 },
+        { id: "curve_1_1", a: -5, b: 8 }    // Example y^2 = x^3 - 5x + 8
+    ];
+
+    // Specific interesting cases
+    // { id: "curve_0_0", a: -3, b: 2 },   // Singular curve (discriminant = 0) y^2 = x(x-sqrt(3))(x+sqrt(3)) -> y^2 = x^3-3x - but this has a=-3, b=0
+    // For a=-3, b=2, discriminant = -16 * (4*(-27) + 27*4) = 0.  y^2 = x^3 - 3x + 2 = (x-1)^2(x+2)
+    // { id: "curve_0_1", a: 0, b: 0 },    // Singular curve (discriminant = 0) y^2 = x^3
+    // { id: "curve_1_0", a: -1, b: 0 },   // Two components y^2 = x^3 - x = x(x-1)(x+1)
+    // { id: "curve_1_1", a: 1, b: 0 }     // One component y^2 = x^3 + x = x(x^2+1)
+
+    // Updated examples for a 2x2 grid
+    // const curvesToShow = [
+    //     { id: "curve_0_0", a: -3, b: 2 },   // Singular: y^2 = (x-1)^2(x+2)
+    //     { id: "curve_0_1", a: 0, b: 0 },    // Singular: y^2 = x^3
+    //     { id: "curve_1_0", a: -1, b: 0 },   // Two components: y^2 = x(x-1)(x+1)
+    //     { id: "curve_1_1", a: 0, b: 1 }     // Smooth curve: y^2 = x^3 + 1
+    // ];
+
+
+    for (const curve of curvesToShow) {
+        drawSingleCurve(curve.id, curve.a, curve.b);
     }
 }
-function drawpath()
-{
-    if (!g_start) return;
-    if (!ec.isoncurve(g_start))
-        console.log("g_start is not on curve");
 
-    var canvas = document.getElementById("points");
-    var ctx = canvas.getContext("2d")
-
-    ctx.beginPath();
-    
-    var p = g_start;
-    startline(ctx, p);
-    for (var i=0 ; i<g_nrlines ; i++)
-    {
-        p = p.add(g_start);
-        drawlineto(ctx, p);
-        if (p.equals(g_start)) {
-            set_cycle_length(i);
-            break;
-        }
-    }
-    ctx.stroke();
-}
-
-function loadpoints()
-{
-    for (var a of curvepoints)
-        for (var b of curvepoints)
-        {
-        }
-}
-function update()
-{
-    loadrealec(g_a, g_b);
-    set_discriminant(-16*(4*g_a**3+27*g_b**2));
-}
-function makesliders()
-{
-    return [
-        makeslider("a:", "a", -16, 16, 0, t=>{ g_a = Number(t); }, ()=>g_a),
-        makeslider("b:", "b", -16, 16, 7, t=>{ g_b = Number(t); }, ()=>g_b),
-        makeslider("nlines:", "n", 0, 1000, 10, t=>{ g_nrlines = Number(t); }, ()=>g_nrlines),
-    ];
-}
-function setsliders()
-{
-    var a = document.getElementById('a');
-    a.value = g_a;
-    a.oninput();
-    var b = document.getElementById('b');
-    b.value = g_b;
-    b.oninput();
-
-}
-function makebutton(label, handler)
-{
-    var btn = el('button', {onclick:handler});
-    btn.innerHTML = label;
-    return btn;
-}
-function makebuttons()
-{
-    return [
-        makebutton("invalid:(0,0)", ()=>{ g_a = Number(0); g_b = Number(0);   setsliders(); update(); }),
-        makebutton("invalid:(-3,2)", ()=>{ g_a = Number(-3); g_b = Number(2); setsliders(); update(); }),
-        makebutton("valid: (0,-1)", ()=>{ g_a = Number(0); g_b = Number(-1);   setsliders(); update(); }),
-        makebutton("valid: (0,1)", ()=>{ g_a = Number(0); g_b = Number(1);   setsliders(); update(); }),
-        makebutton("valid: (-3,3)", ()=>{ g_a = Number(-3); g_b = Number(3);   setsliders(); update(); }),
-        makebutton("valid: (-4,0)", ()=>{ g_a = Number(-4); g_b = Number(0);   setsliders(); update(); }),
-        makebutton("valid: (-1,0)", ()=>{ g_a = Number(-1); g_b = Number(0);   setsliders(); update(); }),
-        makebutton("b such that disc=0", ()=>{ if (g_a<=0) { g_b = (4/27*(-g_a)**3)**(1/2); }  setsliders(); update(); }),
-        makebutton("a such that disc=0", ()=>{ g_a = -((27/4*(g_b)**2)**(1/3));  setsliders(); update(); }),
-    ];
-}
+// Old functions like loadrealec, calcpoints, drawgrid, drawpath, update, makesliders, makebuttons are either
+// replaced, incorporated into drawSingleCurve/drawCurveGrid, or removed for static grid display.
+// Mouse interaction (findpoint, onmousemove) is also removed for now.
 
 function start()
 {
-    var div = document.getElementById("controlsdiv");
-    div.append(...makesliders());
-    var div = document.getElementById("buttonsdiv");
-    div.append(...makebuttons());
+    // Remove old controls and button setup
+    // var divControls = document.getElementById("controlsdiv");
+    // if (divControls) divControls.innerHTML = ''; // Clear old controls
+    // var divButtons = document.getElementById("buttonsdiv");
+    // if (divButtons) divButtons.innerHTML = ''; // Clear old buttons
 
-    var fp = document.getElementById("points");
-    fp.onmousemove = function(e) {
-            var pt = findpoint(e.offsetX, e.offsetY);
-            if (pt) {
-                g_mouse_point = pt;
-                update();
-            }
-        };
+    // Remove mousemove listener from the old canvas if it was targeting a specific one.
+    // The new canvases don't have individual mouse listeners by default with this change.
 
-    update();
-}
-function set_cycle_length(n)
-{
-    var av =document.getElementById("cycle.value"); 
-    av.innerHTML = n;
-}
-function set_discriminant(n)
-{
-    var av =document.getElementById("discriminant.value"); 
-    av.innerHTML = n;
+    drawCurveGrid();
+
+    // The global discriminant display might not make sense for a grid.
+    // Could be updated to show info for a selected curve if interaction is added later.
+    // For now, set_discriminant and set_cycle_length are not called in this flow.
 }
 
+// function set_cycle_length(n) { ... } // Kept if needed later, but not used by grid
+// function set_discriminant(n) { ... } // Kept if needed later, but not used by grid
+
+// The makeslider, el, etc. helper functions from jsutils.js might still be used if controls are re-added.
+// For now, they are not directly invoked by the grid display logic.
 
 </script>
     </head>
@@ -252,17 +186,15 @@ The lines are generated by starting at an arbitrary point, and keep adding it to
 <span>discriminant:</span> <span class=w50 id="discriminant.value"></span>
 </div>
 
-<table>
-    <tr>
-        <td>
-<canvas id="points"></canvas>
-        </td>
-        <td>
-        </td>
-    </tr>
-</table>
-<div id="xygrid"></div>
-<div id="ptgrid"></div>
+<div id="curvegrid_container" style="display: grid; grid-template-columns: auto auto; gap: 10px;">
+    <canvas id="curve_0_0" width="400" height="400" style="border:1px solid #000;"></canvas>
+    <canvas id="curve_0_1" width="400" height="400" style="border:1px solid #000;"></canvas>
+    <canvas id="curve_1_0" width="400" height="400" style="border:1px solid #000;"></canvas>
+    <canvas id="curve_1_1" width="400" height="400" style="border:1px solid #000;"></canvas>
+</div>
+
+<div id="xygrid"></div> <!-- This seems unused, might remove later -->
+<div id="ptgrid"></div> <!-- This seems unused, might remove later -->
     </body>
 </html>
 

@@ -76,6 +76,47 @@ class RealNumbers {
         return this.value(a.real()**(1/3));
     }
 
+    /**
+     * Calculates the natural logarithm (base e).
+     * @param {RealValue|number} a - The value.
+     * @returns {RealValue} The natural logarithm of a.
+     */
+    ln(a) {
+        return this.value(Math.log(realval(a)));
+    }
+
+    /**
+     * Calculates the base-10 logarithm.
+     * @param {RealValue|number} a - The value.
+     * @returns {RealValue} The base-10 logarithm of a.
+     */
+    log10(a) {
+        return this.value(Math.log10(realval(a)));
+    }
+
+    /**
+     * Calculates the base-2 logarithm.
+     * @param {RealValue|number} a - The value.
+     * @returns {RealValue} The base-2 logarithm of a.
+     */
+    log2(a) {
+        return this.value(Math.log2(realval(a)));
+    }
+
+    /**
+     * Calculates the logarithm of a with a specified base.
+     * @param {RealValue|number} base - The base of the logarithm.
+     * @param {RealValue|number} a - The value.
+     * @returns {RealValue} The logarithm of a with the given base.
+     */
+    log(base, a) {
+        const rbase = realval(base);
+        const ra = realval(a);
+        if (rbase <= 0 || rbase === 1) {
+            return this.value(NaN); // Invalid base
+        }
+        return this.value(Math.log(ra) / Math.log(rbase));
+    }
 
     zero() { return 0.0; }
     iszero(x) { return Math.abs(realval(x)) < 0.0001; }

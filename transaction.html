@@ -154,9 +154,24 @@ function makeannotated(children)
 {
     var dl = el('dl');
     for (var ch of children) {
+        // Create the span that will show ch.tagName and have the tooltip
+        var tagNameSpan = el('span', ch.tagName, {class:ch.children.length?'clickable annotated-value-span':'leafnode annotated-value-span'});
+
+        let tooltipParts = [];
+        if (ch.attributes) {
+            for (let i = 0; i < ch.attributes.length; i++) {
+                const attr = ch.attributes[i];
+                // Add as data-* attribute to the span
+                tagNameSpan.setAttribute(`data-${attr.name}`, attr.value);
+                tooltipParts.push(`${attr.name}: ${attr.value}`);
+            }
+        }
+        if (tooltipParts.length > 0) {
+            tagNameSpan.title = tooltipParts.join('; '); // Use semicolon for better readability in tooltip
+        }
+
         var dt = el('dt',
-            // note: this span needs a popup for the ch.attributes
-            el('span', ch.tagName, {class:ch.children.length?'clickable':'leafnode'}),
+            tagNameSpan, // Use the modified span
             ' ',
             el('code', ch.children.length?truncatedstring(ch.textContent, 60):ch.textContent));
         dt.collapsed = true;

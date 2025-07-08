@@ -4,7 +4,8 @@
 const BitcoinRPC = require('./bitcoin_rpc.js');
 const CryptoUtils = require('./crypto_utils.js');
 const bitcoin = require('bitcoinjs-lib');
-const ecpair = require('ecpair'); // For deriving pubkey from privkey
+const ecpair = require('ecpair');
+const ecc = require('tiny-secp256k1'); // Explicitly import tiny-secp256k1
 
 // Basic command line argument parsing
 function parseArgs() {
@@ -55,7 +56,7 @@ async function main() {
 
     const rpcOptions = { host, port, network, username, password };
     const rpc = new BitcoinRPC(rpcOptions);
-    const ECPair = ecpair.ECPairFactory(bitcoin.ecc);
+    const ECPair = ecpair.ECPairFactory(ecc); // Use the explicitly imported ecc module
 
 
     try {
